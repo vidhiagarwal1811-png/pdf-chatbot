@@ -1,4 +1,5 @@
 import os
+import subprocess
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
@@ -36,44 +37,52 @@ model = genai.GenerativeModel("gemini-3.8-flash")
 # LOAD CONTRACTS
 # ==========================================
 
-documents = []
+@st.cache_data
+def load_contracts(folder):
 
-for pdf_file in os.listdir(contracts_folder):
+    documents = []
 
-    if pdf_file.lower().endswith(".pdf"):
+    for pdf_file in os.listdir(folder):
 
-        try:
+        if pdf_file.lower().endswith(".pdf"):
 
-            pdf_path = os.path.join(
-                contracts_folder,
-                pdf_file
-            )
+            try:
 
-            reader = PdfReader(pdf_path)
+                pdf_path = os.path.join(
+                    folder,
+                    pdf_file
+                )
 
-            full_text = ""
+                reader = PdfReader(pdf_path)
 
-            for page in reader.pages:
+                full_text = ""
 
-                try:
+                for page in reader.pages:
 
-                    text = page.extract_text()
+                    try:
 
-                    if text:
-                        full_text += text + "\n"
+                        text = page.extract_text()
 
-                except:
-                    pass
+                        if text:
+                            full_text += text + "\n"
 
-            documents.append(
-                {
-                    "name": pdf_file,
-                    "content": full_text
-                }
-            )
+                    except:
+                        pass
 
-        except Exception:
-            pass
+                documents.append(
+                    {
+                        "name": pdf_file,
+                        "content": full_text
+                    }
+                )
+
+            except:
+                pass
+
+    return documents
+
+
+documents = load_contracts(contracts_folder)
 
 pdf_count = len(documents)
 
@@ -119,6 +128,8 @@ with st.sidebar:
             with open(save_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
 
+            load_contracts.clear()
+
             st.success(
                 f"{uploaded_file.name} uploaded successfully"
             )
@@ -128,8 +139,41 @@ with st.sidebar:
         else:
 
             st.warning(
-                "A contract with this name already exists."
+                "Contract already exists."
             )
+
+    st.divider()
+
+    # --------------------
+    # CHROMADB REBUILD
+    # --------------------
+
+    st.subheader("🔄 Knowledge Base")
+
+    if st.button(
+        "Rebuild Database",
+        use_container_width=True
+    ):
+
+        with st.spinner(
+            "Building ChromaDB..."
+        ):
+
+            try:
+
+                result = subprocess.run(
+                    ["python", "build_db.py"],
+                    capture_output=True,
+                    text=True
+                )
+
+                st.success(
+                    "✅ Database Rebuilt"
+                )
+
+            except Exception as e:
+
+                st.error(str(e))
 
     st.divider()
 
@@ -156,7 +200,7 @@ with st.sidebar:
                 st.session_state["delete_file"] = doc
 
 # ==========================================
-# DELETE CONFIRMATION
+# DELETE CONTRACT
 # ==========================================
 
 if "delete_file" in st.session_state:
@@ -180,6 +224,8 @@ if "delete_file" in st.session_state:
 
                 os.remove(file_path)
 
+                load_contracts.clear()
+
                 del st.session_state["delete_file"]
 
                 st.success(
@@ -190,9 +236,7 @@ if "delete_file" in st.session_state:
 
             except Exception as e:
 
-                st.error(
-                    f"Delete failed: {e}"
-                )
+                st.error(str(e))
 
     with col2:
 
@@ -203,30 +247,14 @@ if "delete_file" in st.session_state:
             st.rerun()
 
 # ==========================================
-# MAIN PAGE
+# MAIN SCREEN
 # ==========================================
 
 st.title("📄 Hotel Contracts Assistant")
 
 st.caption(
-    "Search across hotel contracts, offers, rate sheets and commercial agreements."
+    "Search hotel contracts, rates, offers and commercial agreements."
 )
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.metric(
-        "Contracts Loaded",
-        pdf_count
-    )
-
-with col2:
-    st.metric(
-        "System Status",
-        "Ready ✅"
-    )
-
-st.divider()
 
 question = st.text_input(
     "Ask a question",
@@ -234,7 +262,7 @@ question = st.text_input(
 )
 
 # ==========================================
-# SEARCH
+# CURRENT SEARCH
 # ==========================================
 
 if st.button(
@@ -260,7 +288,7 @@ if st.button(
 
                 contract_text += (
                     f"\n\nDOCUMENT: {doc['name']}\n"
-                    f"{doc['content'][:5000]}"
+                    f"{doc['content'][:3000]}"
                 )
 
             prompt = f"""
@@ -268,20 +296,17 @@ You are an expert hotel contracts assistant.
 
 RULES:
 
-1. Use ONLY the contracts below.
+1. Use ONLY contract information.
 2. Never make up information.
-3. If not found, say:
+3. If unavailable, say:
    Information not found in available contracts.
-4. Always mention the source contract(s).
-5. Keep responses professional and concise.
-
-CONTRACTS:
-
-{contract_text[:60000]}
+4. Mention source document names.
 
 QUESTION:
-
 {question}
+
+CONTRACTS:
+{contract_text[:20000]}
 
 FORMAT:
 
@@ -289,7 +314,7 @@ Answer:
 <answer>
 
 Source:
-<contract name(s)>
+<document names>
 """
 
             try:
@@ -298,7 +323,9 @@ Source:
                     prompt
                 )
 
-                st.markdown("## ✅ Answer")
+                st.markdown(
+                    "## ✅ Answer"
+                )
 
                 st.write(
                     response.text
@@ -306,9 +333,7 @@ Source:
 
             except Exception as e:
 
-                st.error(
-                    f"Error: {str(e)}"
-                )
+                st.error(str(e))
 
 # ==========================================
 # FOOTER
