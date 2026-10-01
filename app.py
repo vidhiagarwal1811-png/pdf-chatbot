@@ -27,7 +27,7 @@ if not os.path.exists(contracts_folder):
     os.makedirs(contracts_folder)
 
 # ==========================================
-# GEMINI CONFIG
+# GEMINI
 # ==========================================
 
 genai.configure(
@@ -43,51 +43,20 @@ model = genai.GenerativeModel("gemini-3.8-flash")
 @st.cache_data
 def load_contracts(folder):
 
-    documents = []
+    docs = []
 
     for pdf_file in os.listdir(folder):
 
         if pdf_file.lower().endswith(".pdf"):
 
-            try:
+            docs.append(pdf_file)
 
-                pdf_path = os.path.join(folder, pdf_file)
-
-                reader = PdfReader(pdf_path)
-
-                text = ""
-
-                for page in reader.pages:
-
-                    try:
-                        page_text = page.extract_text()
-
-                        if page_text:
-                            text += page_text + "\n"
-
-                    except:
-                        pass
-
-                documents.append(
-                    {
-                        "name": pdf_file,
-                        "content": text
-                    }
-                )
-
-            except:
-                pass
-
-    return documents
+    return sorted(docs)
 
 
-documents = load_contracts(contracts_folder)
+contract_names = load_contracts(contracts_folder)
 
-pdf_count = len(documents)
-
-contract_names = sorted(
-    [doc["name"] for doc in documents]
-)
+pdf_count = len(contract_names)
 
 # ==========================================
 # SIDEBAR
@@ -104,9 +73,9 @@ with st.sidebar:
 
     st.divider()
 
-    # --------------------
-    # UPLOAD CONTRACT
-    # --------------------
+    # ----------------------
+    # UPLOAD
+    # ----------------------
 
     st.subheader("📤 Upload Contract")
 
@@ -125,6 +94,7 @@ with st.sidebar:
         if not os.path.exists(save_path):
 
             with open(save_path, "wb") as f:
+
                 f.write(
                     uploaded_file.getbuffer()
                 )
@@ -135,8 +105,6 @@ with st.sidebar:
                 f"{uploaded_file.name} uploaded successfully"
             )
 
-            st.rerun()
-
         else:
 
             st.warning(
@@ -145,9 +113,9 @@ with st.sidebar:
 
     st.divider()
 
-    # --------------------
+    # ----------------------
     # REBUILD DATABASE
-    # --------------------
+    # ----------------------
 
     st.subheader("🔄 Knowledge Base")
 
@@ -162,14 +130,19 @@ with st.sidebar:
 
             try:
 
-                subprocess.run(
+                result = subprocess.run(
                     ["python", "build_db.py"],
                     capture_output=True,
                     text=True
                 )
 
+                st.code(result.stdout)
+
+                if result.stderr:
+                    st.code(result.stderr)
+
                 st.success(
-                    "✅ Database Rebuilt"
+                    "✅ Database Rebuilt Successfully"
                 )
 
             except Exception as e:
@@ -178,9 +151,9 @@ with st.sidebar:
 
     st.divider()
 
-    # --------------------
+    # ----------------------
     # CONTRACT LIST
-    # --------------------
+    # ----------------------
 
     st.subheader("📄 Available Contracts")
 
@@ -189,6 +162,7 @@ with st.sidebar:
         col1, col2 = st.columns([4, 1])
 
         with col1:
+
             st.write(
                 f"📄 {doc}"
             )
@@ -222,12 +196,14 @@ if "delete_file" in st.session_state:
             "✅ Confirm Delete"
         ):
 
-            file_path = os.path.join(
-                contracts_folder,
-                st.session_state["delete_file"]
-            )
-
             try:
+
+                file_path = os.path.join(
+                    contracts_folder,
+                    st.session_state[
+                        "delete_file"
+                    ]
+                )
 
                 os.remove(file_path)
 
@@ -237,6 +213,10 @@ if "delete_file" in st.session_state:
                     "delete_file"
                 ]
 
+                st.success(
+                    "Contract deleted successfully"
+                )
+
                 st.rerun()
 
             except Exception as e:
@@ -245,7 +225,9 @@ if "delete_file" in st.session_state:
 
     with col2:
 
-        if st.button("❌ Cancel"):
+        if st.button(
+            "❌ Cancel"
+        ):
 
             del st.session_state[
                 "delete_file"
@@ -254,7 +236,7 @@ if "delete_file" in st.session_state:
             st.rerun()
 
 # ==========================================
-# MAIN PAGE
+# MAIN SCREEN
 # ==========================================
 
 st.title(
@@ -262,11 +244,12 @@ st.title(
 )
 
 st.caption(
-    "Search contracts using ChromaDB + Gemini"
+    "Search hotel contracts using ChromaDB + Gemini"
 )
 
 question = st.text_input(
-    "Ask a contract-related question"
+    "Ask a contract-related question",
+    placeholder="Example: What is the early bird offer for Furaveri?"
 )
 
 # ==========================================
@@ -286,19 +269,18 @@ if st.button(
 
     else:
 
-        with st.spinner(
-            "Searching knowledge base..."
-        ):
+        try:
 
-            try:
+            with st.spinner(
+                "Searching contracts..."
+            ):
 
                 client = chromadb.PersistentClient(
-                    path="chroma_db"
+                    path="./chroma_db"
                 )
 
                 embedding_func = (
-                    embedding_functions
-                    .SentenceTransformerEmbeddingFunction(
+                    embedding_functions.SentenceTransformerEmbeddingFunction(
                         model_name="all-MiniLM-L6-v2"
                     )
                 )
@@ -315,7 +297,7 @@ if st.button(
 
                 context = ""
 
-                sources = set()
+                sources = []
 
                 for doc, meta in zip(
                     results["documents"][0],
@@ -324,27 +306,33 @@ if st.button(
 
                     context += doc + "\n\n"
 
-                    sources.add(
-                        meta["source"]
+                    source_text = (
+                        f"{meta['source']} "
+                        f"(Page {meta['page']})"
                     )
+
+                    if source_text not in sources:
+
+                        sources.append(
+                            source_text
+                        )
 
                 prompt = f"""
 You are an expert hotel contracts assistant.
 
-Use ONLY the information provided.
+Rules:
 
-If information is missing,
-say:
+1. Use ONLY the context below.
+2. Never make up information.
+3. If information is missing say:
+   Information not found in available contracts.
+4. Keep answers concise and professional.
 
-Information not found in available contracts.
-
-QUESTION:
+Question:
 {question}
 
-CONTEXT:
+Context:
 {context}
-
-Provide a concise business answer.
 """
 
                 response = model.generate_content(
@@ -363,15 +351,17 @@ Provide a concise business answer.
                     "### 📄 Sources"
                 )
 
-                for source in sorted(sources):
+                for source in sources:
 
                     st.write(
                         f"• {source}"
                     )
 
-            except Exception as e:
+        except Exception as e:
 
-                st.error(str(e))
+            st.error(
+                str(e)
+            )
 
 # ==========================================
 # FOOTER
