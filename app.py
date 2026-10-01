@@ -100,6 +100,10 @@ with st.sidebar:
 
     st.divider()
 
+    # --------------------
+    # UPLOAD CONTRACT
+    # --------------------
+
     st.subheader("📤 Upload Contract")
 
     uploaded_file = st.file_uploader(
@@ -134,6 +138,10 @@ with st.sidebar:
             )
 
     st.divider()
+
+    # --------------------
+    # CONTRACT LIST
+    # --------------------
 
     st.subheader("📄 Available Contracts")
 
@@ -245,7 +253,6 @@ if st.button(
             for doc in documents:
 
                 score = 0
-
                 text = doc["content"].lower()
 
                 for word in question_words:
@@ -263,12 +270,16 @@ if st.button(
 
             contract_text = ""
 
+            source_docs = []
+
             for score, doc in relevant_docs:
 
                 contract_text += (
                     f"\n\nDOCUMENT: {doc['name']}\n"
                     f"{doc['content'][:4000]}"
                 )
+
+                source_docs.append(doc["name"])
 
             if not contract_text:
 
@@ -284,8 +295,10 @@ You are an expert hotel contracts assistant.
 Use ONLY the information below.
 
 Rules:
+
 1. Never make up information.
-2. If information is missing, say so.
+2. If information is missing, say:
+Information not found in available contracts.
 3. Mention source document names.
 
 Question:
@@ -293,6 +306,8 @@ Question:
 
 Contracts:
 {contract_text[:30000]}
+
+Provide Answer and Source.
 """
 
                 try:
