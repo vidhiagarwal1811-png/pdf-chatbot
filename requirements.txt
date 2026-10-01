@@ -1,7 +1,4 @@
 streamlit
 google-generativeai
 pypdf
-chromadb==0.5.5
-sentence-transformers==3.0.1
 cryptography
-torch
