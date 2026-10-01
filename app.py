@@ -1,11 +1,7 @@
 import os
-import subprocess
 import streamlit as st
 import google.generativeai as genai
-import chromadb
-
 from pypdf import PdfReader
-from chromadb.utils import embedding_functions
 
 # ==========================================
 # PAGE CONFIG
@@ -27,7 +23,7 @@ if not os.path.exists(contracts_folder):
     os.makedirs(contracts_folder)
 
 # ==========================================
-# GEMINI
+# GEMINI CONFIG
 # ==========================================
 
 genai.configure(
@@ -43,20 +39,51 @@ model = genai.GenerativeModel("gemini-3.8-flash")
 @st.cache_data
 def load_contracts(folder):
 
-    docs = []
+    documents = []
 
     for pdf_file in os.listdir(folder):
 
         if pdf_file.lower().endswith(".pdf"):
 
-            docs.append(pdf_file)
+            try:
 
-    return sorted(docs)
+                pdf_path = os.path.join(folder, pdf_file)
+
+                reader = PdfReader(pdf_path)
+
+                full_text = ""
+
+                for page in reader.pages:
+
+                    try:
+                        text = page.extract_text()
+
+                        if text:
+                            full_text += text + "\n"
+
+                    except:
+                        pass
+
+                documents.append(
+                    {
+                        "name": pdf_file,
+                        "content": full_text
+                    }
+                )
+
+            except:
+                pass
+
+    return documents
 
 
-contract_names = load_contracts(contracts_folder)
+documents = load_contracts(contracts_folder)
 
-pdf_count = len(contract_names)
+pdf_count = len(documents)
+
+contract_names = sorted(
+    [doc["name"] for doc in documents]
+)
 
 # ==========================================
 # SIDEBAR
@@ -72,10 +99,6 @@ with st.sidebar:
     )
 
     st.divider()
-
-    # ----------------------
-    # UPLOAD
-    # ----------------------
 
     st.subheader("📤 Upload Contract")
 
@@ -94,16 +117,15 @@ with st.sidebar:
         if not os.path.exists(save_path):
 
             with open(save_path, "wb") as f:
-
-                f.write(
-                    uploaded_file.getbuffer()
-                )
+                f.write(uploaded_file.getbuffer())
 
             load_contracts.clear()
 
             st.success(
                 f"{uploaded_file.name} uploaded successfully"
             )
+
+            st.rerun()
 
         else:
 
@@ -113,48 +135,6 @@ with st.sidebar:
 
     st.divider()
 
-    # ----------------------
-    # REBUILD DATABASE
-    # ----------------------
-
-    st.subheader("🔄 Knowledge Base")
-
-    if st.button(
-        "Rebuild Database",
-        use_container_width=True
-    ):
-
-        with st.spinner(
-            "Building ChromaDB..."
-        ):
-
-            try:
-
-                result = subprocess.run(
-                    ["python", "build_db.py"],
-                    capture_output=True,
-                    text=True
-                )
-
-                st.code(result.stdout)
-
-                if result.stderr:
-                    st.code(result.stderr)
-
-                st.success(
-                    "✅ Database Rebuilt Successfully"
-                )
-
-            except Exception as e:
-
-                st.error(str(e))
-
-    st.divider()
-
-    # ----------------------
-    # CONTRACT LIST
-    # ----------------------
-
     st.subheader("📄 Available Contracts")
 
     for doc in contract_names:
@@ -162,10 +142,7 @@ with st.sidebar:
         col1, col2 = st.columns([4, 1])
 
         with col1:
-
-            st.write(
-                f"📄 {doc}"
-            )
+            st.write(f"📄 {doc}")
 
         with col2:
 
@@ -174,9 +151,7 @@ with st.sidebar:
                 key=f"delete_{doc}"
             ):
 
-                st.session_state[
-                    "delete_file"
-                ] = doc
+                st.session_state["delete_file"] = doc
 
 # ==========================================
 # DELETE CONTRACT
@@ -192,64 +167,54 @@ if "delete_file" in st.session_state:
 
     with col1:
 
-        if st.button(
-            "✅ Confirm Delete"
-        ):
+        if st.button("✅ Confirm Delete"):
 
             try:
 
                 file_path = os.path.join(
                     contracts_folder,
-                    st.session_state[
-                        "delete_file"
-                    ]
+                    st.session_state["delete_file"]
                 )
 
                 os.remove(file_path)
 
                 load_contracts.clear()
 
-                del st.session_state[
-                    "delete_file"
-                ]
+                del st.session_state["delete_file"]
 
                 st.success(
-                    "Contract deleted successfully"
+                    "Contract deleted successfully."
                 )
 
                 st.rerun()
 
             except Exception as e:
 
-                st.error(str(e))
+                st.error(
+                    f"Delete failed: {e}"
+                )
 
     with col2:
 
-        if st.button(
-            "❌ Cancel"
-        ):
+        if st.button("❌ Cancel"):
 
-            del st.session_state[
-                "delete_file"
-            ]
+            del st.session_state["delete_file"]
 
             st.rerun()
 
 # ==========================================
-# MAIN SCREEN
+# MAIN PAGE
 # ==========================================
 
-st.title(
-    "📄 Hotel Contracts Assistant"
-)
+st.title("📄 Hotel Contracts Assistant")
 
 st.caption(
-    "Search hotel contracts using ChromaDB + Gemini"
+    "Search across hotel contracts, offers, rate sheets and commercial agreements."
 )
 
 question = st.text_input(
-    "Ask a contract-related question",
-    placeholder="Example: What is the early bird offer for Furaveri?"
+    "Ask a question",
+    placeholder="Example: What is the cancellation policy for Villa Nautica?"
 )
 
 # ==========================================
@@ -269,99 +234,82 @@ if st.button(
 
     else:
 
-        try:
+        with st.spinner(
+            "Searching contracts..."
+        ):
 
-            with st.spinner(
-                "Searching contracts..."
-            ):
+            relevant_docs = []
 
-                client = chromadb.PersistentClient(
-                    path="./chroma_db"
+            question_words = question.lower().split()
+
+            for doc in documents:
+
+                score = 0
+
+                text = doc["content"].lower()
+
+                for word in question_words:
+
+                    if len(word) > 3 and word in text:
+                        score += 1
+
+                if score > 0:
+                    relevant_docs.append((score, doc))
+
+            relevant_docs.sort(
+                key=lambda x: x[0],
+                reverse=True
+            )
+
+            contract_text = ""
+
+            for score, doc in relevant_docs:
+
+                contract_text += (
+                    f"\n\nDOCUMENT: {doc['name']}\n"
+                    f"{doc['content'][:4000]}"
                 )
 
-                embedding_func = (
-                    embedding_functions.SentenceTransformerEmbeddingFunction(
-                        model_name="all-MiniLM-L6-v2"
-                    )
+            if not contract_text:
+
+                st.warning(
+                    "No matching contract found."
                 )
 
-                collection = client.get_collection(
-                    name="contracts",
-                    embedding_function=embedding_func
-                )
-
-                results = collection.query(
-                    query_texts=[question],
-                    n_results=10
-                )
-
-                context = ""
-
-                sources = []
-
-                for doc, meta in zip(
-                    results["documents"][0],
-                    results["metadatas"][0]
-                ):
-
-                    context += doc + "\n\n"
-
-                    source_text = (
-                        f"{meta['source']} "
-                        f"(Page {meta['page']})"
-                    )
-
-                    if source_text not in sources:
-
-                        sources.append(
-                            source_text
-                        )
+            else:
 
                 prompt = f"""
 You are an expert hotel contracts assistant.
 
-Rules:
+Use ONLY the information below.
 
-1. Use ONLY the context below.
-2. Never make up information.
-3. If information is missing say:
-   Information not found in available contracts.
-4. Keep answers concise and professional.
+Rules:
+1. Never make up information.
+2. If information is missing, say so.
+3. Mention source document names.
 
 Question:
 {question}
 
-Context:
-{context}
+Contracts:
+{contract_text[:30000]}
 """
 
-                response = model.generate_content(
-                    prompt
-                )
+                try:
 
-                st.markdown(
-                    "## ✅ Answer"
-                )
-
-                st.write(
-                    response.text
-                )
-
-                st.markdown(
-                    "### 📄 Sources"
-                )
-
-                for source in sources:
-
-                    st.write(
-                        f"• {source}"
+                    response = model.generate_content(
+                        prompt
                     )
 
-        except Exception as e:
+                    st.markdown("## ✅ Answer")
 
-            st.error(
-                str(e)
-            )
+                    st.write(
+                        response.text
+                    )
+
+                except Exception as e:
+
+                    st.error(str(e))
 
 # ==========================================
 # FOOTER
@@ -370,5 +318,5 @@ Context:
 st.divider()
 
 st.caption(
-    "Powered by ChromaDB + Gemini"
+    "Hotel Contracts Assistant | Powered by Gemini"
 )
