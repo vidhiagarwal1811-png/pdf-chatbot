@@ -36,48 +36,44 @@ model = genai.GenerativeModel("gemini-3.8-flash")
 # LOAD CONTRACTS
 # ==========================================
 
-@st.cache_data
-def load_contracts(folder):
+documents = []
 
-    documents = []
+for pdf_file in os.listdir(contracts_folder):
 
-    for pdf_file in os.listdir(folder):
+    if pdf_file.lower().endswith(".pdf"):
 
-        if pdf_file.lower().endswith(".pdf"):
+        try:
 
-            try:
+            pdf_path = os.path.join(
+                contracts_folder,
+                pdf_file
+            )
 
-                pdf_path = os.path.join(folder, pdf_file)
+            reader = PdfReader(pdf_path)
 
-                reader = PdfReader(pdf_path)
+            full_text = ""
 
-                full_text = ""
+            for page in reader.pages:
 
-                for page in reader.pages:
+                try:
 
-                    try:
-                        text = page.extract_text()
+                    text = page.extract_text()
 
-                        if text:
-                            full_text += text + "\n"
+                    if text:
+                        full_text += text + "\n"
 
-                    except:
-                        pass
+                except:
+                    pass
 
-                documents.append(
-                    {
-                        "name": pdf_file,
-                        "content": full_text
-                    }
-                )
+            documents.append(
+                {
+                    "name": pdf_file,
+                    "content": full_text
+                }
+            )
 
-            except:
-                pass
-
-    return documents
-
-
-documents = load_contracts(contracts_folder)
+        except Exception:
+            pass
 
 pdf_count = len(documents)
 
@@ -123,8 +119,6 @@ with st.sidebar:
             with open(save_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
 
-            load_contracts.clear()
-
             st.success(
                 f"{uploaded_file.name} uploaded successfully"
             )
@@ -134,7 +128,7 @@ with st.sidebar:
         else:
 
             st.warning(
-                "Contract already exists."
+                "A contract with this name already exists."
             )
 
     st.divider()
@@ -162,7 +156,7 @@ with st.sidebar:
                 st.session_state["delete_file"] = doc
 
 # ==========================================
-# DELETE CONTRACT
+# DELETE CONFIRMATION
 # ==========================================
 
 if "delete_file" in st.session_state:
@@ -185,8 +179,6 @@ if "delete_file" in st.session_state:
                 )
 
                 os.remove(file_path)
-
-                load_contracts.clear()
 
                 del st.session_state["delete_file"]
 
@@ -220,6 +212,22 @@ st.caption(
     "Search across hotel contracts, offers, rate sheets and commercial agreements."
 )
 
+col1, col2 = st.columns(2)
+
+with col1:
+    st.metric(
+        "Contracts Loaded",
+        pdf_count
+    )
+
+with col2:
+    st.metric(
+        "System Status",
+        "Ready ✅"
+    )
+
+st.divider()
+
 question = st.text_input(
     "Ask a question",
     placeholder="Example: What is the cancellation policy for Villa Nautica?"
@@ -246,85 +254,61 @@ if st.button(
             "Searching contracts..."
         ):
 
-            relevant_docs = []
-
-            question_words = question.lower().split()
+            contract_text = ""
 
             for doc in documents:
 
-                score = 0
-                text = doc["content"].lower()
-
-                for word in question_words:
-
-                    if len(word) > 3 and word in text:
-                        score += 1
-
-                if score > 0:
-                    relevant_docs.append((score, doc))
-
-            relevant_docs.sort(
-                key=lambda x: x[0],
-                reverse=True
-            )
-
-            contract_text = ""
-
-            source_docs = []
-
-            for score, doc in relevant_docs:
-
                 contract_text += (
                     f"\n\nDOCUMENT: {doc['name']}\n"
-                    f"{doc['content'][:4000]}"
+                    f"{doc['content'][:5000]}"
                 )
 
-                source_docs.append(doc["name"])
-
-            if not contract_text:
-
-                st.warning(
-                    "No matching contract found."
-                )
-
-            else:
-
-                prompt = f"""
+            prompt = f"""
 You are an expert hotel contracts assistant.
 
-Use ONLY the information below.
+RULES:
 
-Rules:
+1. Use ONLY the contracts below.
+2. Never make up information.
+3. If not found, say:
+   Information not found in available contracts.
+4. Always mention the source contract(s).
+5. Keep responses professional and concise.
 
-1. Never make up information.
-2. If information is missing, say:
-Information not found in available contracts.
-3. Mention source document names.
+CONTRACTS:
 
-Question:
+{contract_text[:60000]}
+
+QUESTION:
+
 {question}
 
-Contracts:
-{contract_text[:30000]}
+FORMAT:
 
-Provide Answer and Source.
+Answer:
+<answer>
+
+Source:
+<contract name(s)>
 """
 
-                try:
+            try:
 
-                    response = model.generate_content(
-                        prompt
-                    )
+                response = model.generate_content(
+                    prompt
+                )
 
-                    st.markdown("## ✅ Answer")
+                st.markdown("## ✅ Answer")
 
-                    st.write(
-                        response.text
-                    )
+                st.write(
+                    response.text
+                )
 
-                except Exception as e:
+            except Exception as e:
 
-                    st.error(str(e))
+                st.error(
+                    f"Error: {str(e)}"
+                )
 
 # ==========================================
 # FOOTER
