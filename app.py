@@ -14,13 +14,6 @@ st.set_page_config(
 )
 
 # ==================================
-# HEADER
-# ==================================
-
-st.title("📄 Hotel Contracts Assistant")
-st.caption("Search hotel contracts, rates, policies and commercial terms")
-
-# ==================================
 # GEMINI CONFIG
 # ==================================
 
@@ -28,9 +21,7 @@ genai.configure(
     api_key=st.secrets["GEMINI_API_KEY"]
 )
 
-model = genai.GenerativeModel(
-    "gemini-3.8-flash"
-)
+model = genai.GenerativeModel("gemini-3.8-flash")
 
 # ==================================
 # LOAD CONTRACTS
@@ -43,50 +34,70 @@ pdf_count = 0
 
 if os.path.exists(contracts_folder):
 
-    with st.spinner("Loading contracts..."):
+    for pdf_file in os.listdir(contracts_folder):
 
-        for pdf_file in os.listdir(contracts_folder):
+        if pdf_file.lower().endswith(".pdf"):
 
-            if pdf_file.lower().endswith(".pdf"):
+            try:
 
-                try:
+                pdf_path = os.path.join(
+                    contracts_folder,
+                    pdf_file
+                )
 
-                    pdf_path = os.path.join(
-                        contracts_folder,
-                        pdf_file
-                    )
+                reader = PdfReader(pdf_path)
 
-                    reader = PdfReader(pdf_path)
+                full_text = ""
 
-                    full_text = ""
+                for page in reader.pages:
 
-                    for page in reader.pages:
+                    try:
 
-                        try:
+                        text = page.extract_text()
 
-                            page_text = page.extract_text()
+                        if text:
+                            full_text += text + "\n"
 
-                            if page_text:
-                                full_text += page_text + "\n"
+                    except:
+                        pass
 
-                        except:
-                            pass
+                documents.append(
+                    {
+                        "name": pdf_file,
+                        "content": full_text
+                    }
+                )
 
-                    documents.append(
-                        {
-                            "name": pdf_file,
-                            "content": full_text
-                        }
-                    )
+                pdf_count += 1
 
-                    pdf_count += 1
-
-                except Exception:
-                    pass
+            except Exception:
+                pass
 
 # ==================================
-# DASHBOARD
+# SIDEBAR
 # ==================================
+
+with st.sidebar:
+
+    st.title("📚 Contract Library")
+
+    st.success(f"{pdf_count} Contracts Loaded")
+
+    st.divider()
+
+    for doc in sorted(documents, key=lambda x: x["name"]):
+
+        st.write(f"📄 {doc['name']}")
+
+# ==================================
+# MAIN PAGE
+# ==================================
+
+st.title("📄 Hotel Contracts Assistant")
+
+st.caption(
+    "Search hotel contracts, rates, cancellation policies, offers and commercial terms."
+)
 
 col1, col2 = st.columns(2)
 
@@ -99,11 +110,13 @@ with col1:
 with col2:
     st.metric(
         "Knowledge Base",
-        "Ready"
+        "Ready ✅"
     )
 
+st.divider()
+
 # ==================================
-# QUESTION BOX
+# QUESTION
 # ==================================
 
 question = st.text_input(
@@ -115,93 +128,74 @@ question = st.text_input(
 # ASK BUTTON
 # ==================================
 
-if st.button("🔍 Search Contracts"):
+if st.button("🔍 Search Contracts", use_container_width=True):
 
     if not question:
 
-        st.warning(
-            "Please enter a question."
-        )
+        st.warning("Please enter a question.")
 
     else:
 
         with st.spinner("Searching contracts..."):
 
-            combined_text = ""
-
-            source_docs = []
+            contract_text = ""
 
             for doc in documents:
 
-                combined_text += (
+                contract_text += (
                     f"\n\nDOCUMENT: {doc['name']}\n"
                     f"{doc['content'][:8000]}"
                 )
 
-                source_docs.append(doc["name"])
-
             prompt = f"""
 You are an expert hotel contracting assistant.
 
-Rules:
+You must answer ONLY using information available in the contracts.
 
-1. Use ONLY information present in the contracts.
-2. If the answer cannot be found, say:
+Instructions:
+
+1. Never make up an answer.
+2. If information is unavailable, say:
    "Information not found in available contracts."
-3. Give concise business-friendly answers.
-4. Mention source document names used.
+3. Keep answers concise and professional.
+4. Always provide source document names.
+5. Mention only the documents actually used.
 
 CONTRACTS:
 
-{combined_text[:60000]}
+{contract_text[:60000]}
 
 QUESTION:
 
 {question}
 
-RESPONSE FORMAT:
+FORMAT RESPONSE EXACTLY AS:
 
 Answer:
 <answer>
 
-Sources:
-- document name
+Source:
+<source document names>
 """
 
             try:
 
-                response = model.generate_content(
-                    prompt
-                )
+                response = model.generate_content(prompt)
 
-                st.success("Answer Generated")
+                st.markdown("## ✅ Answer")
 
-                st.subheader("Answer")
-
-                st.write(response.text)
-
-                with st.expander(
-                    "📄 Available Source Documents"
-                ):
-
-                    for doc in source_docs:
-
-                        st.write(f"• {doc}")
+                st.markdown(response.text)
 
             except Exception as e:
 
-                st.error(
-                    f"Error: {e}"
-                )
+                st.error(f"Error: {e}")
 
 # ==================================
-# CONTRACT LIBRARY
+# FOOTER
 # ==================================
 
-with st.expander("📚 Contract Library"):
+st.divider()
 
-    for doc in documents:
-
-        st.write(
-            f"📄 {doc['name']}"
-        )
+st.caption(
+    "Hotel Contracts Assistant | Powered by Gemini"
+)
