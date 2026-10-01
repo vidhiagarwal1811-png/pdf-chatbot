@@ -3,9 +3,9 @@ import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
 
-# ======================================
+# ==========================================
 # PAGE CONFIG
-# ======================================
+# ==========================================
 
 st.set_page_config(
     page_title="Hotel Contracts Assistant",
@@ -13,18 +13,18 @@ st.set_page_config(
     layout="wide"
 )
 
-# ======================================
-# CREATE CONTRACTS FOLDER IF NEEDED
-# ======================================
+# ==========================================
+# CONTRACTS FOLDER
+# ==========================================
 
 contracts_folder = "contracts"
 
 if not os.path.exists(contracts_folder):
     os.makedirs(contracts_folder)
 
-# ======================================
+# ==========================================
 # GEMINI CONFIG
-# ======================================
+# ==========================================
 
 genai.configure(
     api_key=st.secrets["GEMINI_API_KEY"]
@@ -32,9 +32,9 @@ genai.configure(
 
 model = genai.GenerativeModel("gemini-3.8-flash")
 
-# ======================================
-# LOAD PDFS
-# ======================================
+# ==========================================
+# LOAD CONTRACTS
+# ==========================================
 
 documents = []
 
@@ -77,16 +77,33 @@ for pdf_file in os.listdir(contracts_folder):
 
 pdf_count = len(documents)
 
-# ======================================
+contract_names = sorted(
+    [doc["name"] for doc in documents]
+)
+
+# ==========================================
 # SIDEBAR
-# ======================================
+# ==========================================
 
 with st.sidebar:
 
     st.title("📚 Contract Library")
 
+    st.metric(
+        "Contracts Loaded",
+        pdf_count
+    )
+
+    st.divider()
+
+    # --------------------
+    # UPLOAD CONTRACT
+    # --------------------
+
+    st.subheader("📤 Upload Contract")
+
     uploaded_file = st.file_uploader(
-        "📤 Upload New Contract",
+        "Choose PDF",
         type=["pdf"]
     )
 
@@ -97,38 +114,102 @@ with st.sidebar:
             uploaded_file.name
         )
 
-        with open(save_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+        if not os.path.exists(save_path):
 
-        st.success(
-            f"✅ {uploaded_file.name} uploaded successfully"
-        )
+            with open(save_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
 
-        st.rerun()
+            st.success(
+                f"{uploaded_file.name} uploaded successfully"
+            )
+
+            st.rerun()
+
+        else:
+
+            st.warning(
+                "A contract with this name already exists."
+            )
 
     st.divider()
 
-    st.metric(
-        "Contracts",
-        pdf_count
+    # --------------------
+    # CONTRACT LIST
+    # --------------------
+
+    st.subheader("📄 Available Contracts")
+
+    for doc in contract_names:
+
+        col1, col2 = st.columns([4, 1])
+
+        with col1:
+            st.write(f"📄 {doc}")
+
+        with col2:
+
+            if st.button(
+                "🗑️",
+                key=f"delete_{doc}"
+            ):
+
+                st.session_state["delete_file"] = doc
+
+# ==========================================
+# DELETE CONFIRMATION
+# ==========================================
+
+if "delete_file" in st.session_state:
+
+    st.warning(
+        f"Delete contract: {st.session_state['delete_file']} ?"
     )
 
-    st.divider()
+    col1, col2 = st.columns(2)
 
-    for doc in sorted(
-        documents,
-        key=lambda x: x["name"]
-    ):
-        st.write(f"📄 {doc['name']}")
+    with col1:
 
-# ======================================
-# MAIN SCREEN
-# ======================================
+        if st.button("✅ Confirm Delete"):
+
+            try:
+
+                file_path = os.path.join(
+                    contracts_folder,
+                    st.session_state["delete_file"]
+                )
+
+                os.remove(file_path)
+
+                del st.session_state["delete_file"]
+
+                st.success(
+                    "Contract deleted successfully."
+                )
+
+                st.rerun()
+
+            except Exception as e:
+
+                st.error(
+                    f"Delete failed: {e}"
+                )
+
+    with col2:
+
+        if st.button("❌ Cancel"):
+
+            del st.session_state["delete_file"]
+
+            st.rerun()
+
+# ==========================================
+# MAIN PAGE
+# ==========================================
 
 st.title("📄 Hotel Contracts Assistant")
 
 st.caption(
-    "Search across hotel contracts, offers, rate sheets and commercial agreements"
+    "Search across hotel contracts, offers, rate sheets and commercial agreements."
 )
 
 col1, col2 = st.columns(2)
@@ -149,12 +230,12 @@ st.divider()
 
 question = st.text_input(
     "Ask a question",
-    placeholder="Example: What is the cancellation policy for Furaveri Maldives?"
+    placeholder="Example: What is the cancellation policy for Villa Nautica?"
 )
 
-# ======================================
+# ==========================================
 # SEARCH
-# ======================================
+# ==========================================
 
 if st.button(
     "🔍 Search Contracts",
@@ -173,41 +254,42 @@ if st.button(
             "Searching contracts..."
         ):
 
-            all_contract_text = ""
+            contract_text = ""
 
             for doc in documents:
 
-                all_contract_text += (
+                contract_text += (
                     f"\n\nDOCUMENT: {doc['name']}\n"
                     f"{doc['content'][:5000]}"
                 )
 
             prompt = f"""
-You are an expert Hotel Contracts Assistant.
+You are an expert hotel contracts assistant.
 
-Rules:
+RULES:
 
-1. Use ONLY the information present in the contracts.
-2. Do not make up information.
-3. If not found, reply:
+1. Use ONLY the contracts below.
+2. Never make up information.
+3. If not found, say:
    Information not found in available contracts.
-4. Always mention the exact source document(s).
+4. Always mention the source contract(s).
+5. Keep responses professional and concise.
 
 CONTRACTS:
 
-{all_contract_text[:60000]}
+{contract_text[:60000]}
 
 QUESTION:
 
 {question}
 
-RESPONSE FORMAT:
+FORMAT:
 
 Answer:
 <answer>
 
 Source:
-<document name(s)>
+<contract name(s)>
 """
 
             try:
@@ -228,12 +310,12 @@ Source:
                     f"Error: {str(e)}"
                 )
 
-# ======================================
+# ==========================================
 # FOOTER
-# ======================================
+# ==========================================
 
 st.divider()
 
 st.caption(
-    "Powered by Gemini AI"
+    "Hotel Contracts Assistant | Powered by Gemini"
 )
