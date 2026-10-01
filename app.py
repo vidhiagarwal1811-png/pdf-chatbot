@@ -1,20 +1,21 @@
 import os
 import streamlit as st
-from openai import OpenAI
+import google.generativeai as genai
 from pypdf import PdfReader
 
-st.set_page_config(page_title="Contracts Assistant")
+st.set_page_config(page_title="Hotel Contracts Assistant")
 
 st.title("📄 Hotel Contracts Assistant")
 
-client = OpenAI(
-    api_key=st.secrets["OPENAI_API_KEY"]
+genai.configure(
+    api_key=st.secrets["GEMINI_API_KEY"]
 )
 
-pdf_text = ""
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 contracts_folder = "contracts"
 
+pdf_text = ""
 pdf_count = 0
 
 if os.path.exists(contracts_folder):
@@ -23,26 +24,37 @@ if os.path.exists(contracts_folder):
 
         if pdf_file.lower().endswith(".pdf"):
 
-            pdf_count += 1
+            try:
 
-            pdf_path = os.path.join(
-                contracts_folder,
-                pdf_file
-            )
+                pdf_count += 1
 
-            reader = PdfReader(pdf_path)
+                pdf_path = os.path.join(
+                    contracts_folder,
+                    pdf_file
+                )
 
-            for page in reader.pages:
+                reader = PdfReader(pdf_path)
 
-                text = page.extract_text()
+                for page in reader.pages:
 
-                if text:
-                    pdf_text += (
-                        f"\n\nDOCUMENT: {pdf_file}\n"
-                        f"{text}"
-                    )
+                    try:
 
-st.success(f"{pdf_count} contracts loaded")
+                        text = page.extract_text()
+
+                        if text:
+                            pdf_text += (
+                                f"\n\nDOCUMENT: {pdf_file}\n{text}"
+                            )
+
+                    except:
+                        pass
+
+            except:
+                st.warning(
+                    f"Could not read {pdf_file}"
+                )
+
+st.success(f"{pdf_count} PDFs loaded")
 
 question = st.text_input(
     "Ask a question about contracts"
@@ -54,25 +66,17 @@ if st.button("Ask"):
 
         with st.spinner("Searching contracts..."):
 
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"""
-You are a hotel contracting assistant.
+            prompt = f"""
+You are a hotel contracts assistant.
 
-Use only the contract content below.
+Use only the contract information below.
 
-{pdf_text[:100000]}
+{pdf_text[:50000]}
 
 Question:
 {question}
 """
-                    }
-                ]
-            )
 
-            st.write(
-                response.choices[0].message.content
-            )
+            response = model.generate_content(prompt)
+
+            st.write(response.text)
