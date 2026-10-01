@@ -2,7 +2,10 @@ import os
 import subprocess
 import streamlit as st
 import google.generativeai as genai
+import chromadb
+
 from pypdf import PdfReader
+from chromadb.utils import embedding_functions
 
 # ==========================================
 # PAGE CONFIG
@@ -48,23 +51,19 @@ def load_contracts(folder):
 
             try:
 
-                pdf_path = os.path.join(
-                    folder,
-                    pdf_file
-                )
+                pdf_path = os.path.join(folder, pdf_file)
 
                 reader = PdfReader(pdf_path)
 
-                full_text = ""
+                text = ""
 
                 for page in reader.pages:
 
                     try:
+                        page_text = page.extract_text()
 
-                        text = page.extract_text()
-
-                        if text:
-                            full_text += text + "\n"
+                        if page_text:
+                            text += page_text + "\n"
 
                     except:
                         pass
@@ -72,7 +71,7 @@ def load_contracts(folder):
                 documents.append(
                     {
                         "name": pdf_file,
-                        "content": full_text
+                        "content": text
                     }
                 )
 
@@ -126,7 +125,9 @@ with st.sidebar:
         if not os.path.exists(save_path):
 
             with open(save_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
+                f.write(
+                    uploaded_file.getbuffer()
+                )
 
             load_contracts.clear()
 
@@ -145,7 +146,7 @@ with st.sidebar:
     st.divider()
 
     # --------------------
-    # CHROMADB REBUILD
+    # REBUILD DATABASE
     # --------------------
 
     st.subheader("🔄 Knowledge Base")
@@ -161,7 +162,7 @@ with st.sidebar:
 
             try:
 
-                result = subprocess.run(
+                subprocess.run(
                     ["python", "build_db.py"],
                     capture_output=True,
                     text=True
@@ -188,7 +189,9 @@ with st.sidebar:
         col1, col2 = st.columns([4, 1])
 
         with col1:
-            st.write(f"📄 {doc}")
+            st.write(
+                f"📄 {doc}"
+            )
 
         with col2:
 
@@ -197,7 +200,9 @@ with st.sidebar:
                 key=f"delete_{doc}"
             ):
 
-                st.session_state["delete_file"] = doc
+                st.session_state[
+                    "delete_file"
+                ] = doc
 
 # ==========================================
 # DELETE CONTRACT
@@ -213,24 +218,24 @@ if "delete_file" in st.session_state:
 
     with col1:
 
-        if st.button("✅ Confirm Delete"):
+        if st.button(
+            "✅ Confirm Delete"
+        ):
+
+            file_path = os.path.join(
+                contracts_folder,
+                st.session_state["delete_file"]
+            )
 
             try:
-
-                file_path = os.path.join(
-                    contracts_folder,
-                    st.session_state["delete_file"]
-                )
 
                 os.remove(file_path)
 
                 load_contracts.clear()
 
-                del st.session_state["delete_file"]
-
-                st.success(
-                    "Contract deleted successfully."
-                )
+                del st.session_state[
+                    "delete_file"
+                ]
 
                 st.rerun()
 
@@ -242,27 +247,30 @@ if "delete_file" in st.session_state:
 
         if st.button("❌ Cancel"):
 
-            del st.session_state["delete_file"]
+            del st.session_state[
+                "delete_file"
+            ]
 
             st.rerun()
 
 # ==========================================
-# MAIN SCREEN
+# MAIN PAGE
 # ==========================================
 
-st.title("📄 Hotel Contracts Assistant")
+st.title(
+    "📄 Hotel Contracts Assistant"
+)
 
 st.caption(
-    "Search hotel contracts, rates, offers and commercial agreements."
+    "Search contracts using ChromaDB + Gemini"
 )
 
 question = st.text_input(
-    "Ask a question",
-    placeholder="Example: What is the cancellation policy for Villa Nautica?"
+    "Ask a contract-related question"
 )
 
 # ==========================================
-# CURRENT SEARCH
+# SEARCH
 # ==========================================
 
 if st.button(
@@ -279,45 +287,65 @@ if st.button(
     else:
 
         with st.spinner(
-            "Searching contracts..."
+            "Searching knowledge base..."
         ):
 
-            contract_text = ""
+            try:
 
-            for doc in documents:
-
-                contract_text += (
-                    f"\n\nDOCUMENT: {doc['name']}\n"
-                    f"{doc['content'][:3000]}"
+                client = chromadb.PersistentClient(
+                    path="chroma_db"
                 )
 
-            prompt = f"""
+                embedding_func = (
+                    embedding_functions
+                    .SentenceTransformerEmbeddingFunction(
+                        model_name="all-MiniLM-L6-v2"
+                    )
+                )
+
+                collection = client.get_collection(
+                    name="contracts",
+                    embedding_function=embedding_func
+                )
+
+                results = collection.query(
+                    query_texts=[question],
+                    n_results=10
+                )
+
+                context = ""
+
+                sources = set()
+
+                for doc, meta in zip(
+                    results["documents"][0],
+                    results["metadatas"][0]
+                ):
+
+                    context += doc + "\n\n"
+
+                    sources.add(
+                        meta["source"]
+                    )
+
+                prompt = f"""
 You are an expert hotel contracts assistant.
 
-RULES:
+Use ONLY the information provided.
 
-1. Use ONLY contract information.
-2. Never make up information.
-3. If unavailable, say:
-   Information not found in available contracts.
-4. Mention source document names.
+If information is missing,
+say:
+
+Information not found in available contracts.
 
 QUESTION:
 {question}
 
-CONTRACTS:
-{contract_text[:20000]}
+CONTEXT:
+{context}
 
-FORMAT:
-
-Answer:
-<answer>
-
-Source:
-<document names>
+Provide a concise business answer.
 """
-
-            try:
 
                 response = model.generate_content(
                     prompt
@@ -331,6 +359,16 @@ Source:
                     response.text
                 )
 
+                st.markdown(
+                    "### 📄 Sources"
+                )
+
+                for source in sorted(sources):
+
+                    st.write(
+                        f"• {source}"
+                    )
+
             except Exception as e:
 
                 st.error(str(e))
@@ -342,5 +380,5 @@ Source:
 st.divider()
 
 st.caption(
-    "Hotel Contracts Assistant | Powered by Gemini"
+    "Powered by ChromaDB + Gemini"
 )
